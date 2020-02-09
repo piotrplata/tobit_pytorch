@@ -62,6 +62,10 @@
     \max_{\boldsymbol{\beta}} \mathcal{L}
     \end{equation}
 
+    Because its easier to work with sum and adding and because logarithm is monotone increasing we can solve equivalent problem by taking log of \mathcal{L}
+    \begin{equation}
+       \max_{\boldsymbol{\beta}}  \sum_{i=1}^N  \left[  log(\mathcal{L}_{1,i}){(1-l_i)(1-r_i)} \right]* \left[log(\mathcal{L}_{2,i}){(l_i)(1-r_i)} \right] * \left[log(\mathcal{L}_{3,i}){(1-l_i)(r_i)} \right]
+    \end{equation}
 
 
 \end{document}
