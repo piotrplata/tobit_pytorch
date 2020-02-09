@@ -1,0 +1,67 @@
+%! Author = piotr
+%! Date = 09.02.2020
+
+% Preamble
+\documentclass[11pt]{article}
+
+% Packages
+\usepackage{amsmath}
+\usepackage[margin=1in]{geometry}
+% Document
+\begin{document}
+
+    \section*{Model}
+    Tobit model is a regression model where some of the dependent variable $y_{i}^*$ observations $i$ are censored.
+    For censored observations all we can say is that the variable is less(left censoring) or more(right censoring) than some other value $c_{i}$.
+    Let's indicate that variable is left censored with $l_{i} = 1, r_{i} = 0$, right censored with $r_{i} = 1, l_{i} = 0$ and is not censored when $r_{i} = 0 = l_{i}$.
+    Let's call the latent variable before censoring $y^*$.
+
+    \begin{equation}
+        y_i = \begin{cases}
+                  y_i^* & \text{if } r_{i} = 0 = l_{i}, \\
+                  c_i & \text{if } l_{i} = 1, r_{i} = 0, \\
+                  c_i & \text{if } r_{i} = 1, l_{i} = 0
+        \end{cases}
+    \end{equation}
+
+    We assume that the underlying generative model is:
+    \begin{equation}
+        y^*_i = f(\boldsymbol{x_i},\boldsymbol{\beta}) + \epsilon
+    \end{equation}
+
+    Where $\boldsymbol{x_i}$ are independent variables and $\boldsymbol{\beta}$ are model parameters and $\epsilon$ is normally distributed $\epsilon\sim\mathcal{N}(0,\sigma^{2})$.
+    Then $y^*_i$ is also normally distributed $y^*_i\sim\mathcal{N}(f(\boldsymbol{x_i},\boldsymbol{\beta}),\sigma^{2})$
+    After observing real data we try to find parameters $\boldsymbol{\beta}$ that fits the data.
+    We do it using maximum likelihood estimation.
+    We have 3 types of observation that will translate to parts of likelihood.
+    For uncensored data we take probability density function at $y_i$ observed values. Let $pdf$ be the probability density function of standard normal distribution
+    \begin{equation}
+        \mathcal{L}_{1,i} = pdf(\frac{y_i - f(\boldsymbol{x_i},\boldsymbol{\beta})}{\sigma}) \frac{1}{\sigma}
+    \end{equation}
+
+    For left censored data we take probability that latent variable is less than observed variable. Let $cdf$ be cumulative distribution function of standard normal distribution
+    \begin{equation}
+        \mathcal{L}_{2,i} = \mathcal{P}(y^*_i \leq y_i) = cdf(\frac{y_i - f(\boldsymbol{x_i},\boldsymbol{\beta})}{\sigma})
+    \end{equation}
+
+    For right censored data we take probability that latent variable is more than observed variable
+
+    \begin{equation}
+        \mathcal{L}_{3,i} = \mathcal{P}(y^*_i > y_i) = 1 - cdf(\frac{y_i - f(\boldsymbol{x_i},\boldsymbol{\beta})}{\sigma})
+    \end{equation}
+
+    Finally putting everything together
+
+    \begin{equation}
+    \mathcal{L} = \prod_{i=1}^N = \mathcal{L}_{1,i}^{(1-l_i)(1-r_i)} * \mathcal{L}_{2,i}^{(l_i)(1-r_i)} * \mathcal{L}_{3,i}^{(1-l_i)(r_i)}
+    \end{equation}
+
+    Our goal is to find
+
+    \begin{equation}
+    \max_{\boldsymbol{\beta}} \mathcal{L}
+    \end{equation}
+
+
+
+\end{document}
