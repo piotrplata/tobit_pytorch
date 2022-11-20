@@ -1,29 +1,29 @@
 import numpy as np
-from tensorflow.keras.layers import Input, Dense
-import tensorflow as tf
-import tensorflow_probability as tfp
-from tensorflow.keras.models import Model
-from tensorflow.keras.optimizers import Adam
+import torch
+from torch.utils.data import TensorDataset, DataLoader
 
-####GENERATING DATA#####
+device = "cuda" if torch.cuda.is_available() else "cpu"
+print(f"Using {device} device")
+
+#### GENERATING DATA#####
 # Data generation form simple linear model with censoring at random points. Each censoring may be at different value.
 # If we observe a value but we know that the real value is more or less than the observed one. We call it censoring
 
-NUM_SAMPLES = 30000
+NUM_SAMPLES = 3000
 
 # Linear generative model parameteres
-B = [5, -6, 3]
+B = [5, -2, 3]
 SIGMA = 5
 
 input_size = len(B)
 # y_train is latent variable
-x_train = np.random.randn(NUM_SAMPLES, input_size)
+x_train = np.random.randn(NUM_SAMPLES, input_size)*100
 y_train = np.sum(x_train * B, axis=1) + np.random.randn(NUM_SAMPLES) * SIGMA
 
 y_train = y_train.reshape(NUM_SAMPLES, -1)
 
 # creating hypothethical censor points
-censor_train = np.random.randn(NUM_SAMPLES, 1) * SIGMA
+censor_train = y_train + np.random.randn(NUM_SAMPLES, 1)*5
 # determine is it censoring from below or from abovee
 down_censor = (censor_train > y_train).astype(int)
 up_censor = (censor_train < y_train).astype(int)
@@ -40,89 +40,89 @@ y_train[censored_ind == 1] = censor_train[censored_ind == 1]
 # down_censor - indicator of censoring from below (also known as left censoring)
 # up_censor - indicator of censoring from above (also known as right censoring)
 
-####MODEL####
-# This model represent true hidden latent variable
-class Model(object):
-    def __init__(self, input_size):
-        # variables for linear model
-        self.b = tf.Variable(tf.ones([input_size, 1]))
-        # in MLE estimation we also estimate variance of our normal distribution
-        self.sigma = tf.Variable(1.)
+class LinearRegression(torch.nn.Module):
+    def __init__(self, number_of_parameters):
+        super().__init__()
+        self.b = torch.nn.Parameter(torch.randn((number_of_parameters)))
+        self.bias = torch.nn.Parameter(torch.randn(()))
+        self.sigma = torch.nn.Parameter(
+            torch.abs(torch.randn(()))
+        )
 
-    def __call__(self, x):
-        x = tf.cast(x, tf.float32)
-        return tf.matmul(x, self.b), self.sigma
+    def forward(self, x):
+        return torch.matmul(x, self.b) + self.bias
+
+    def string(self):
+        return f'{self.b} {self.sigma} {self.bias}'
 
 
-model = Model(input_size)
+zero_tensor = torch.tensor([0.0]).to(device)
 
 
-####LOG LIKELOHOOD####
-# to calculate true hidden model we use information about observable value and censoring info
 def loglike(y, sigma, y_, up_ind, down_ind):
-    """DATA FROM MODEL
-    y - output of model
-    sigma - variance of random error (it's also estimated during learning)
-
-    TRUE DATA
-    y_ - observed value
-    up_ind - indication of right censoring
-    down_ind - indication of left censoring
+    """Calculate logarithm of likelihood for censored tobit model.
+    Args:
+        Model parameters:
+            y: model output
+            sigma: variance of random error (estimated during learning)
+        True data:
+            y_: observed data
+            up_ind: boolean indication of right censoring
+            down_ind: boolean indication of left censoring
+    Returns:
+        Logharithm of likelihood
     """
-    y = tf.cast(y, tf.float32)
-    y_ = tf.cast(y_, tf.float32)
-    up_ind = tf.cast(up_ind, tf.float32)
-    down_ind = tf.cast(down_ind, tf.float32)
 
-    normaldist = tfp.distributions.Normal(loc=0., scale=1.)
+    normaldist = torch.distributions.Normal(
+        zero_tensor, sigma)
 
     # model outputs normal distribution with center at y and std at sigma
 
     # probability function of normal distribution at point y_
-    not_censored_log_argument = normaldist.prob((y_ - y) / sigma) / sigma
+    not_censored_log = normaldist.log_prob(y_ - y)
     # probability of point random variable being more than y_
-    up_censored_log_argument = 1 - normaldist.cdf((y_ - y) / sigma)
+    up_censored_log_argument = (1 - normaldist.cdf(y_ - y))
     # probability of random variable being less than y_
-    down_censored_log_argument = normaldist.cdf((y_ - y) / sigma)
+    down_censored_log_argument = normaldist.cdf(y_ - y)
 
-    not_censored_log_argument = tf.clip_by_value(not_censored_log_argument, 0.0000001, 10000000)
-    up_censored_log_argument = tf.clip_by_value(up_censored_log_argument, 0.0000001, 10000000)
-    down_censored_log_argument = tf.clip_by_value(down_censored_log_argument, 0.0000001, 10000000)
+    up_censored_log_argument = torch.clip(
+        up_censored_log_argument, 0.00001, 0.99999)
+    down_censored_log_argument = torch.clip(
+        down_censored_log_argument, 0.00001, 0.99999)
 
     # logarithm of likelihood
-    loglike = tf.math.log(not_censored_log_argument) * (1 - up_ind) * (1 - down_ind) + tf.math.log(
-        up_censored_log_argument) * up_ind * (1 - down_ind) + tf.math.log(down_censored_log_argument) * down_ind * (
-                      1 - up_ind)
-    loglike2 = tf.reduce_sum(loglike)
-    # we want to maximize likelihood, but tensorflow minimizes by default
+    loglike = not_censored_log * (1 - up_ind) * (1 - down_ind)
+    loglike += torch.log(up_censored_log_argument) * up_ind
+    loglike += torch.log(down_censored_log_argument) * down_ind
+
+    loglike2 = torch.sum(loglike)
+    # we want to maximize likelihood, but optimizer minimizes by default
     loss = -loglike2
     return loss
 
 
-####MAXIMUM LIKELIHOOD ESTIMATION####
-optimizer = Adam(0.1)
-train_loss = tf.keras.metrics.Mean(name='train_loss')
+model = LinearRegression(3).to(device)
+optimizer = torch.optim.Adam(model.parameters(), lr=0.1)
 
+x_train = torch.from_numpy(x_train).float().to(device)
+y_train = torch.from_numpy(y_train).float().squeeze().to(device)
+up_censor = torch.from_numpy(up_censor).squeeze().to(device)
+down_censor = torch.from_numpy(down_censor).squeeze().to(device)
 
-@tf.function
-def train_step(x, y_, up_ind, down_ind):
-    with tf.GradientTape() as tape:
-        y, sigma = model(x)
-        loss = loglike(y, sigma, y_, up_ind, down_ind)
-        trainable_variables = [model.b, model.sigma]
+my_dataset = TensorDataset(x_train, y_train, up_censor, down_censor)
+my_dataloader = DataLoader(my_dataset, batch_size=128, shuffle=True)
 
-        gradients = tape.gradient(loss, trainable_variables)
-        optimizer.apply_gradients(zip(gradients, trainable_variables))
-        train_loss(loss)
+for t in range(500):
+    for x_train_batch, y_train_batch, up_censor_batch, down_censor_batch in my_dataloader:
+        y_pred = model(x_train_batch)
+        loss = loglike(y_pred, model.sigma, y_train_batch,
+                       up_censor_batch, down_censor_batch)
 
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
 
-EPOCHS = 1000
+    if t % 100 == 0:
+        print(t, loss.item())
 
-for epoch in range(EPOCHS):
-    train_loss.reset_states()
-
-    train_step(x_train, y_train, up_censor, down_censor)
-
-    template = 'Epoch: {}, Loss: {}, Est_B: {}, Est_SIGMA: {}'
-
-    print(template.format(epoch + 1, train_loss.result(), model.b.value(), model.sigma.value()))
+print(f'Result: {model.string()}')
